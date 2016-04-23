@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning -- Final Project"
+author: "Mark Delcambre"
+date: "Friday, April 22, 2016"
+output: html_document
+---
+
+
+### Background
+Here is the introduction of the exercise:
+
+"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset)."
+
+
+### Data
+The training data for this project are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+The data for this project came from: <http://groupware.les.inf.puc-rio.br/har>. 
+
+### Preprocessing
+In order to reproduce the same results, one needs a certain set of packages, as well as a random seed equal to the one used here.
+
+The following packages were used for this project:
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+Now is the time to set the seed:
+```{r}
+set.seed(17459)
+```
+
+### Downloading the Data
+The training and test data can be found by running the following commands:
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+Next, we will load the data into memory:
+```{r}
+trainRaw <- read.csv(url(trainUrl))
+testRaw <- read.csv(url(testUrl))
+dim(trainRaw)
+dim(testRaw)
+```
+We are set to predict the "classe" variable in the training set.
+
+### Cleaning and Partitioning the Data
+Here, we clean the data and remove observations with missing values as well as some meaningless variables.
+```{r}
+sum(complete.cases(trainRaw))
+```
+Remove columns that contain NA (missing values)
+```{r}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0]
+testRaw <- testRaw[, colSums(is.na(trainRaw)) == 0]
+```
+We can remove columns that do not contribute to the accelerometer measurements
+```{r}
+classe <- trainRaw$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainRaw))
+trainRaw <- trainRaw[, !trainRemove]
+trainCleaned <- trainRaw[, sapply(trainRaw, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testRaw))
+testRaw <- testRaw[, !testRemove]
+testCleaned <- testRaw[, sapply(testRaw, is.numeric)]
+dim(testCleaned)
+dim(trainCleaned)
+```
+We see that the cleaned training and testing data sets contains 53 variables, and the "classe" variable is still in the training set
+
+Now, we split the cleaned data into a pure training set (70%) and a testing set (30%). We will use the validation data set to cross validate in later steps
+
+```{r}
+inTrain <- createDataPartition(trainCleaned$classe, p = 0.70, list = FALSE)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+### Using ML algorithms for prediction: Random Forests
+We are choosing a Random Forest algorithm for our predictive model because it automatically selects important variables and is robust to correlated covariates and outliers. 5-fold cross validation will also be used.
+```{r}
+controlRf <- trainControl(method = "cv", 5)
+modelRf <- train(classe ~ ., data = trainData, method = "rf", trControl=controlRf, ntree = 250)
+modelRf
+```
+Estimate the performance of the model:
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+So the predicted accuracy is 99.46% with an estimated out-of-sample error 0.54%.
+
+### Prediction
+We can now apploy the model to the original testing data set. We first remove the ```{r} problem_id``` column.
+```{r}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```
+
+### Generating Files for Submission
+```{r}
+randFor_write_files = function(x){
+     n = length(x)
+     for(i in 1:n){
+          filename = paste0("problem_id_",i,".txt")
+          write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+     }
+}
+randFor_write_files(result)
+```
+
+### Appendix: Figures
+1. Correlation Matrix Visualization
+```{r}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method = "color")
+```
+
+2. Decision Tree Visualization
+```{r}
+decTree <- rpart(classe ~ ., data = trainData, method = "class")
+prp(decTree)
+```
+
